@@ -7,7 +7,7 @@
 //   Value: the Atlassian API token stored in config/.env.dev
 // ─────────────────────────────────────────────────────────────────────────────
 def createJiraTask(String summary, String statusEmoji, String detail) {
-    def auth   = "${env.JIRA_EMAIL}:${env.JIRA_API_TOKEN}".bytes.encodeBase64().toString()
+    def auth   = "${env.JIRA_EMAIL}:${env.JIRA_API_TOKEN}".toString().bytes.encodeBase64().toString()
     def body   = """
 {
   "fields": {
@@ -111,15 +111,24 @@ pipeline {
             steps {
                 echo '🖥️  Running UI tests on Chromium...'
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh '''
-                        npx playwright test \
-                          tests/homepage.spec.ts       \
-                          tests/homepagefix.spec.ts    \
-                          tests/loginPage.spec.ts      \
-                          tests/loginpagefix.spec.ts   \
-                          tests/signupPage.spec.ts     \
-                          --project=chromium
-                    '''
+                    // ✅ JIRA_* vars explicitly passed so JiraReporter.ts
+                    //    can read them via process.env inside the Node process
+                    withEnv([
+                        "JIRA_BASE_URL=${env.JIRA_BASE_URL}",
+                        "JIRA_EMAIL=${env.JIRA_EMAIL}",
+                        "JIRA_API_TOKEN=${env.JIRA_API_TOKEN}",
+                        "JIRA_PROJECT_KEY=${env.JIRA_PROJECT_KEY}"
+                    ]) {
+                        sh '''
+                            npx playwright test \
+                              tests/homepage.spec.ts       \
+                              tests/homepagefix.spec.ts    \
+                              tests/loginPage.spec.ts      \
+                              tests/loginpagefix.spec.ts   \
+                              tests/signupPage.spec.ts     \
+                              --project=chromium
+                        '''
+                    }
                 }
             }
             post {
@@ -147,7 +156,14 @@ pipeline {
             steps {
                 echo '🔌 Running API tests...'
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh 'npx playwright test tests/apiTests/ --project=api'
+                    withEnv([
+                        "JIRA_BASE_URL=${env.JIRA_BASE_URL}",
+                        "JIRA_EMAIL=${env.JIRA_EMAIL}",
+                        "JIRA_API_TOKEN=${env.JIRA_API_TOKEN}",
+                        "JIRA_PROJECT_KEY=${env.JIRA_PROJECT_KEY}"
+                    ]) {
+                        sh 'npx playwright test tests/apiTests/ --project=api'
+                    }
                 }
             }
             post {
@@ -174,8 +190,15 @@ pipeline {
             steps {
                 echo '🤖 Running Playwright MCP BDD cart test (Gherkin feature)...'
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh 'npx bddgen --config playwright.config.ts'
-                    sh 'npx playwright test --project=bdd-chromium'
+                    withEnv([
+                        "JIRA_BASE_URL=${env.JIRA_BASE_URL}",
+                        "JIRA_EMAIL=${env.JIRA_EMAIL}",
+                        "JIRA_API_TOKEN=${env.JIRA_API_TOKEN}",
+                        "JIRA_PROJECT_KEY=${env.JIRA_PROJECT_KEY}"
+                    ]) {
+                        sh 'npx bddgen --config playwright.config.ts'
+                        sh 'npx playwright test --project=bdd-chromium'
+                    }
                 }
             }
             post {
@@ -200,31 +223,28 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────────
-        stage('Generate Allure Report') {
-        // ─────────────────────────────────────────────
-            steps {
-                echo '📈 Generating combined Allure report...'
-                sh 'npx allure generate allure-results --clean -o allure-report'
-            }
-            post {
-                always {
-                    // ✅ archiveArtifacts moved here from global post to fix
-                    // "Required context class hudson.FilePath is missing" error
-                    archiveArtifacts artifacts: 'allure-report/**', allowEmptyArchive: true
-                    allure([
-                        includeProperties: false,
-                        jdk: '',
-                        results: [[path: 'allure-results']]
-                    ])
-                }
-            }
-        }
-    }
+    }   // end stages
 
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // Global post — runs ALWAYS, even when earlier stages fail.
+    // Allure generation lives here so test failures never skip the report.
+    // ─────────────────────────────────────────────────────────────────────────
     post {
-    // ─────────────────────────────────────────────
+        always {
+            echo '📈 Generating Allure report...'
+            // Generate the static HTML from allure-results written by Playwright
+            sh 'npx allure generate allure-results --clean -o allure-report || true'
+
+            // Archive the raw report folder so it is downloadable
+            archiveArtifacts artifacts: 'allure-report/**', allowEmptyArchive: true
+
+            // Publish via the Allure Jenkins plugin (adds the sidebar link)
+            allure([
+                includeProperties: false,
+                jdk              : '',
+                results          : [[path: 'allure-results']]
+            ])
+        }
         success {
             echo '✅ Pipeline completed — all UI and API tests passed!'
             script {
