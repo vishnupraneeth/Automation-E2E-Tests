@@ -8,16 +8,19 @@ import {
 import https from "https";
 import http from "http";
 import { URL } from "url";
+import { LangChainJiraAnalyzer } from "./LangChainJiraAnalyzer"; // ✅ NEW
 
 /**
  * JiraReporter — Custom Playwright reporter that creates a Jira bug ticket
- * for every failed test.
+ * for every failed test, then posts an AI root cause analysis comment
+ * via LangChain + GPT-4o.
  *
  * Configuration (via environment variables, loaded by playwright.config.ts):
  *   JIRA_BASE_URL     — e.g. https://yourcompany.atlassian.net
  *   JIRA_EMAIL        — Atlassian account email
  *   JIRA_API_TOKEN    — Atlassian API token
  *   JIRA_PROJECT_KEY  — Jira project key (e.g. KAN)
+ *   OPENAI_API_KEY    — OpenAI key (optional — skipped gracefully if missing)
  */
 export default class JiraReporter implements Reporter {
   private baseUrl: string = "";
@@ -25,6 +28,9 @@ export default class JiraReporter implements Reporter {
   private token: string = "";
   private projectKey: string = "";
   private auth: string = "";
+
+  // ✅ NEW — instantiated once, reused for every failure in the run
+  private analyzer = new LangChainJiraAnalyzer();
 
   // Collect failures synchronously in onTestEnd; file bugs in onEnd
   private failures: Array<{ test: TestCase; result: TestResult }> = [];
@@ -47,6 +53,16 @@ export default class JiraReporter implements Reporter {
       );
     } else {
       console.log(`[JiraReporter] ✅ Ready — will log bugs to ${this.projectKey} on failure`);
+    }
+
+    // ✅ NEW — warn early if OpenAI key is absent, but never block the run
+    if (!process.env.OPENAI_API_KEY) {
+      console.warn(
+        "[JiraReporter] ⚠️  OPENAI_API_KEY not set — AI analysis will be skipped. " +
+          "Jira tickets will still be created normally."
+      );
+    } else {
+      console.log("[JiraReporter] 🤖 LangChain AI analysis enabled");
     }
   }
 
@@ -73,12 +89,32 @@ export default class JiraReporter implements Reporter {
       const description = this.buildDescription(testTitle, testFile, errorMessage, result);
 
       try {
+        // ── Step 1: Create Jira issue (your original logic, untouched) ────
         const issueKey = await this.createJiraIssue(summary, description);
         const issueUrl = `${this.baseUrl}/browse/${issueKey}`;
         this.createdIssues.push({ testTitle, issueKey, issueUrl });
         // ✅ Print immediately so it appears in Jenkins logs right away
         process.stdout.write(`[JiraReporter] 🐞 Bug filed: ${issueKey}  →  ${issueUrl}\n`);
+
+        // ── Step 2: AI analysis via LangChain (NEW) ───────────────────────
+        // All errors inside analyzeAndComment() are caught internally and
+        // never propagate here — so your Jira ticket is always safe.
+        await this.analyzer.analyzeAndComment({
+          testTitle,
+          specFile:     testFile,
+          errorMessage,
+          browser:      test.parent?.project()?.name ?? "unknown",
+          duration:     result.duration,
+          retries:      result.retry,
+          jiraIssueKey: issueKey,
+          jiraBaseUrl:  this.baseUrl,
+          jiraEmail:    this.email,
+          jiraApiToken: this.token,
+        });
+
       } catch (err: unknown) {
+        // Only Jira issue creation errors reach here —
+        // LangChain errors are always swallowed inside analyzeAndComment()
         const msg = err instanceof Error ? err.message : String(err);
         this.failedIssues.push({ testTitle, error: msg });
         process.stdout.write(`[JiraReporter] ❌ Failed to create Jira issue for "${testTitle}": ${msg}\n`);
@@ -118,7 +154,7 @@ export default class JiraReporter implements Reporter {
     process.stdout.write(`[JiraReporter] ${divider}\n\n`);
   }
 
-  // ─── helpers ───────────────────────────────────────────────────────────────
+  // ─── helpers (all original, zero changes) ──────────────────────────────────
 
   private buildDescription(
     title: string,
