@@ -47,7 +47,7 @@ reporter: [
      baseURL: process.env.BASE_URL, // This env will be selected from top configuration based on the ENV variable set in the .env file
      screenshot: 'only-on-failure',
      video: 'retain-on-failure',
-     headless: false,
+     headless: true,
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
@@ -59,12 +59,12 @@ reporter: [
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-    {
-        name: 'api',
-        use: { 
-            baseURL: 'https://restful-booker.herokuapp.com',
-        },
-    },
+    // {
+    //     name: 'api',
+    //     use: { 
+    //         baseURL: 'https://restful-booker.herokuapp.com',
+    //     },
+    // },
     {
       name: 'security',
       testDir: './security',
