@@ -103,8 +103,8 @@ pipeline {
         stage('Install Dependencies') {
         // ─────────────────────────────────────────────
             steps {
-                echo '📦 Installing npm dependencies...'
-                sh 'npm ci'
+                // echo '📦 Installing npm dependencies...'
+                // sh 'npm ci'
 
                 echo '🌐 Installing Chromium browser...'
                 sh 'npx playwright install chromium --with-deps'
@@ -236,7 +236,7 @@ pipeline {
     post {
     // ─────────────────────────────────────────────
         always {
-            sh 'rm -rf /root/.cache/ms-playwright || true'
+            // sh 'rm -rf /root/.cache/ms-playwright || true'
             archiveArtifacts artifacts: 'allure-report/**', allowEmptyArchive: true
             // cleanWs()   // Clean workspace after each build
         }
