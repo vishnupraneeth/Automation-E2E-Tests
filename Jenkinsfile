@@ -1,71 +1,40 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Jira helper — creates a Task in the KAN project via Jira REST API v3.
-// Called from stage-level post{failure} blocks and the global post{success}.
-//
-// Jenkins setup required (one-time):
-//   Manage Jenkins → Credentials → Add Secret Text with ID: jira-api-token
-//   Value: the Atlassian API token stored in config/.env.dev
-// ─────────────────────────────────────────────────────────────────────────────
+def failedStages = []
+
 def createJiraTask(String summary, String statusEmoji, String detail) {
-    def auth   = "${env.JIRA_EMAIL}:${env.JIRA_API_TOKEN}".toString().bytes.encodeBase64().toString()
-    def body   = """
+    def auth = "${env.JIRA_EMAIL}:${env.JIRA_API_TOKEN}".toString().bytes.encodeBase64().toString()
+
+    def body = """
 {
   "fields": {
-    "project":     { "key": "${env.JIRA_PROJECT_KEY}" },
-    "summary":     "${statusEmoji} ${summary} — Build #${env.BUILD_NUMBER}",
+    "project": { "key": "${env.JIRA_PROJECT_KEY}" },
+    "summary": "${statusEmoji} ${summary} — Build #${env.BUILD_NUMBER}",
     "description": {
-      "version": 1,
       "type": "doc",
+      "version": 1,
       "content": [
-        { "type": "heading", "attrs": { "level": 2 },
-          "content": [{ "type": "text", "text": "CI Pipeline Details" }] },
-        { "type": "bulletList",
+        {
+          "type": "paragraph",
           "content": [
-            { "type": "listItem", "content": [{ "type": "paragraph",
-                "content": [{ "type": "text", "text": "Job: ${env.JOB_NAME}" }] }] },
-            { "type": "listItem", "content": [{ "type": "paragraph",
-                "content": [{ "type": "text", "text": "Build: #${env.BUILD_NUMBER}" }] }] },
-            { "type": "listItem", "content": [{ "type": "paragraph",
-                "content": [{ "type": "text", "text": "Branch: ${env.GIT_BRANCH ?: 'N/A'}" }] }] },
-            { "type": "listItem", "content": [{ "type": "paragraph",
-                "content": [{ "type": "text", "text": "URL: ${env.BUILD_URL}" }] }] }
+            {
+              "type": "text",
+              "text": "${detail}"
+            }
           ]
-        },
-        { "type": "heading", "attrs": { "level": 3 },
-          "content": [{ "type": "text", "text": "Detail" }] },
-        { "type": "paragraph",
-          "content": [{ "type": "text", "text": "${detail}" }] },
-        { "type": "paragraph",
-          "content": [{ "type": "text",
-            "text": "Auto-created by Jenkins JiraReporter stage." }] }
+        }
       ]
     },
     "issuetype": { "name": "Task" }
   }
 }
 """
-    def response = sh(
-        script: """
-            curl -s -w "\\n%{http_code}" -X POST \\
-              -H "Authorization: Basic ${auth}" \\
-              -H "Content-Type: application/json" \\
-              -H "Accept: application/json" \\
-              --data '${body.replaceAll("'", "'\\''")}' \\
-              "${env.JIRA_BASE_URL}/rest/api/3/issue"
-        """,
-        returnStdout: true
-    ).trim()
 
-    def parts    = response.tokenize('\n')
-    def httpCode = parts.last()
-    def jsonBody = parts.dropRight(1).join('\n')
-
-    if (httpCode.startsWith('2')) {
-        def issueKey = readJSON(text: jsonBody).key
-        echo "🐞 Jira task created: ${env.JIRA_BASE_URL}/browse/${issueKey}"
-    } else {
-        echo "⚠️  Jira API returned HTTP ${httpCode}: ${jsonBody}"
-    }
+    sh """
+        curl -s -X POST \\
+          -H "Authorization: Basic ${auth}" \\
+          -H "Content-Type: application/json" \\
+          --data '${body.replaceAll("'", "'\\''")}' \\
+          "${env.JIRA_BASE_URL}/rest/api/3/issue" || true
+    """
 }
 
 pipeline {
@@ -76,12 +45,12 @@ pipeline {
     }
 
     environment {
-        ENV              = 'dev'
-        CI               = 'true'
-        JIRA_BASE_URL    = 'https://vishnupraneeth96-1781416967185.atlassian.net'
-        JIRA_EMAIL       = 'vishnupraneeth96@gmail.com'
+        ENV = 'dev'
+        CI = 'true'
+        JIRA_BASE_URL = 'https://vishnupraneeth96-1781416967185.atlassian.net'
+        JIRA_EMAIL = 'vishnupraneeth96@gmail.com'
         JIRA_PROJECT_KEY = 'KAN'
-        JIRA_API_TOKEN   = credentials('jira-api-token')
+        JIRA_API_TOKEN = credentials('jira-api-token')
     }
 
     options {
@@ -93,170 +62,106 @@ pipeline {
 
     stages {
 
-        // ─────────────────────────────────────────────
         stage('Install Dependencies') {
-        // ─────────────────────────────────────────────
             steps {
-                echo '📦 Installing npm dependencies...'
                 sh 'npm ci'
-
-                echo '🌐 Installing Chromium browser...'
                 sh 'npx playwright install chromium --with-deps'
             }
         }
 
-        // ─────────────────────────────────────────────
         stage('UI Tests') {
-        // ─────────────────────────────────────────────
             steps {
-                echo '🖥️  Running UI tests on Chromium...'
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    // ✅ JIRA_* vars explicitly passed so JiraReporter.ts
-                    //    can read them via process.env inside the Node process
-                    withEnv([
-                        "JIRA_BASE_URL=${env.JIRA_BASE_URL}",
-                        "JIRA_EMAIL=${env.JIRA_EMAIL}",
-                        "JIRA_API_TOKEN=${env.JIRA_API_TOKEN}",
-                        "JIRA_PROJECT_KEY=${env.JIRA_PROJECT_KEY}"
-                    ]) {
-                        sh '''
-                            npx playwright test \
-                              tests/homepage.spec.ts       \
-                              tests/homepagefix.spec.ts    \
-                              tests/loginPage.spec.ts      \
-                              tests/loginpagefix.spec.ts   \
-                              tests/signupPage.spec.ts     \
-                              --project=chromium
-                        '''
-                    }
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    sh '''
+                        npx playwright test \
+                          tests/homepage.spec.ts \
+                          tests/homepagefix.spec.ts \
+                          tests/loginPage.spec.ts \
+                          tests/loginpagefix.spec.ts \
+                          tests/signupPage.spec.ts \
+                          --project=chromium
+                    '''
                 }
             }
             post {
                 always {
-                    echo '📊 Archiving UI test artifacts...'
-                    archiveArtifacts artifacts: 'test-results/**',        allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'test-results/**', allowEmptyArchive: true
                     archiveArtifacts artifacts: 'reports/html-report/**', allowEmptyArchive: true
                 }
-                failure {
-                    echo '❌ UI Tests failed. Check screenshots/videos in archived artifacts.'
+                unsuccessful {
                     script {
-                        createJiraTask(
-                            '[CI Failure] UI Tests',
-                            '❌',
-                            'Playwright UI tests failed on Chromium. Check screenshots and videos in the archived test-results artifacts.'
-                        )
+                        failedStages << 'UI Tests'
                     }
                 }
             }
         }
 
-        // ─────────────────────────────────────────────
         stage('API Tests') {
-        // ─────────────────────────────────────────────
             steps {
-                echo '🔌 Running API tests...'
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    withEnv([
-                        "JIRA_BASE_URL=${env.JIRA_BASE_URL}",
-                        "JIRA_EMAIL=${env.JIRA_EMAIL}",
-                        "JIRA_API_TOKEN=${env.JIRA_API_TOKEN}",
-                        "JIRA_PROJECT_KEY=${env.JIRA_PROJECT_KEY}"
-                    ]) {
-                        sh 'npx playwright test tests/apiTests/ --project=api'
-                    }
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    sh 'npx playwright test tests/apiTests/ --project=api'
                 }
             }
             post {
                 always {
-                    echo '📊 Archiving API test artifacts...'
                     archiveArtifacts artifacts: 'test-results/**', allowEmptyArchive: true
                 }
-                failure {
-                    echo '❌ API Tests failed. Review response logs above.'
+                unsuccessful {
                     script {
-                        createJiraTask(
-                            '[CI Failure] API Tests',
-                            '❌',
-                            'Playwright API tests failed. Review the HTTP response logs in the Jenkins console output.'
-                        )
+                        failedStages << 'API Tests'
                     }
                 }
             }
         }
 
-        // ─────────────────────────────────────────────
         stage('MCP Run - BDD Cart Test') {
-        // ─────────────────────────────────────────────
             steps {
-                echo '🤖 Running Playwright MCP BDD cart test (Gherkin feature)...'
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    withEnv([
-                        "JIRA_BASE_URL=${env.JIRA_BASE_URL}",
-                        "JIRA_EMAIL=${env.JIRA_EMAIL}",
-                        "JIRA_API_TOKEN=${env.JIRA_API_TOKEN}",
-                        "JIRA_PROJECT_KEY=${env.JIRA_PROJECT_KEY}"
-                    ]) {
-                        sh 'npx bddgen --config playwright.config.ts'
-                        sh 'npx playwright test --project=bdd-chromium'
-                    }
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    sh 'npx bddgen --config playwright.config.ts'
+                    sh 'npx playwright test --project=bdd-chromium'
                 }
             }
             post {
                 always {
-                    echo '📊 Archiving MCP BDD test artifacts...'
-                    archiveArtifacts artifacts: 'test-results/**',  allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'test-results/**', allowEmptyArchive: true
                     archiveArtifacts artifacts: '.features-gen/**', allowEmptyArchive: true
                 }
-                success {
-                    echo '✅ MCP BDD Cart Test passed!'
-                }
-                failure {
-                    echo '❌ MCP BDD Cart Test failed. Check screenshots/videos in archived artifacts.'
+                unsuccessful {
                     script {
-                        createJiraTask(
-                            '[CI Failure] BDD Cart Test',
-                            '❌',
-                            'Playwright BDD (Gherkin) cart test failed. Check screenshots/videos in the archived .features-gen and test-results artifacts.'
-                        )
+                        failedStages << 'BDD Cart Test'
                     }
                 }
             }
         }
+    }
 
-    }   // end stages
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Global post — runs ALWAYS, even when earlier stages fail.
-    // Allure generation lives here so test failures never skip the report.
-    // ─────────────────────────────────────────────────────────────────────────
     post {
         always {
-            echo '📈 Generating Allure report...'
-            // Generate the static HTML from allure-results written by Playwright
+            echo 'Generating Allure report...'
+
             sh 'npx allure generate allure-results --clean -o allure-report || true'
 
-            // Archive the raw report folder so it is downloadable
             archiveArtifacts artifacts: 'allure-report/**', allowEmptyArchive: true
 
-            // Publish via the Allure Jenkins plugin (adds the sidebar link)
             allure([
                 includeProperties: false,
-                jdk              : '',
-                results          : [[path: 'allure-results']]
+                jdk: '',
+                results: [[path: 'allure-results']]
             ])
-        }
-        success {
-            echo '✅ Pipeline completed — all UI and API tests passed!'
+
             script {
-                createJiraTask(
-                    '[CI Success] All Tests Passed',
-                    '✅',
-                    'All pipeline stages completed successfully: UI Tests, API Tests, BDD Cart Test, and Allure report generated.'
-                )
+                if (failedStages.size() > 0) {
+                    currentBuild.result = 'FAILURE'
+
+                    createJiraTask(
+                        '[CI Failure] Test Stages Failed',
+                        '❌',
+                        "Failed stages: ${failedStages.join(', ')}. Allure report generated. Build URL: ${env.BUILD_URL}"
+                    )
+                } else {
+                    currentBuild.result = 'SUCCESS'
+                }
             }
-        }
-        failure {
-            echo '❌ Pipeline failed. Check stage logs and archived test artifacts.'
         }
     }
 }
