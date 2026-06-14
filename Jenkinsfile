@@ -7,9 +7,6 @@
 //   Value: the Atlassian API token stored in config/.env.dev
 // ─────────────────────────────────────────────────────────────────────────────
 def createJiraTask(String summary, String statusEmoji, String detail) {
-    // JIRA_API_TOKEN is already in the environment (injected from Jenkins Credentials
-    // via environment { JIRA_API_TOKEN = credentials('jira-api-token') }).
-    // The same env var is also read by Playwright's JiraReporter.ts via dotenv.
     def auth   = "${env.JIRA_EMAIL}:${env.JIRA_API_TOKEN}".bytes.encodeBase64().toString()
     def body   = """
 {
@@ -75,18 +72,15 @@ pipeline {
     agent any
 
     tools {
-        nodejs 'NodeJS-20'   // Configure in: Jenkins > Manage > Global Tool Configuration
+        nodejs 'NodeJS-20'
     }
 
     environment {
-        ENV              = 'dev'         // Loads config/.env.dev via playwright.config.ts
-        CI               = 'true'        // Enables retries=2, workers=1 in playwright.config.ts
+        ENV              = 'dev'
+        CI               = 'true'
         JIRA_BASE_URL    = 'https://vishnupraneeth96-1781416967185.atlassian.net'
         JIRA_EMAIL       = 'vishnupraneeth96@gmail.com'
         JIRA_PROJECT_KEY = 'KAN'
-        // Injected from Jenkins Credentials store (ID: jira-api-token).
-        // This sets process.env.JIRA_API_TOKEN for both the Playwright JiraReporter
-        // and the createJiraTask() Groovy helper — no need to store the token in .env.dev.
         JIRA_API_TOKEN   = credentials('jira-api-token')
     }
 
@@ -103,8 +97,8 @@ pipeline {
         stage('Install Dependencies') {
         // ─────────────────────────────────────────────
             steps {
-                // echo '📦 Installing npm dependencies...'
-                // sh 'npm ci'
+                echo '📦 Installing npm dependencies...'
+                sh 'npm ci'
 
                 echo '🌐 Installing Chromium browser...'
                 sh 'npx playwright install chromium --with-deps'
@@ -116,8 +110,6 @@ pipeline {
         // ─────────────────────────────────────────────
             steps {
                 echo '🖥️  Running UI tests on Chromium...'
-                // catchError keeps the pipeline running so API tests always execute.
-                // Final build result is still FAILURE if this stage fails.
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh '''
                         npx playwright test \
@@ -133,7 +125,7 @@ pipeline {
             post {
                 always {
                     echo '📊 Archiving UI test artifacts...'
-                    archiveArtifacts artifacts: 'test-results/**',       allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'test-results/**',        allowEmptyArchive: true
                     archiveArtifacts artifacts: 'reports/html-report/**', allowEmptyArchive: true
                 }
                 failure {
@@ -182,18 +174,15 @@ pipeline {
             steps {
                 echo '🤖 Running Playwright MCP BDD cart test (Gherkin feature)...'
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    // Step 1: Generate Playwright test files from .feature + step definitions
                     sh 'npx bddgen --config playwright.config.ts'
-
-                    // Step 2: Run the BDD project (features/cart.feature)
                     sh 'npx playwright test --project=bdd-chromium'
                 }
             }
             post {
                 always {
                     echo '📊 Archiving MCP BDD test artifacts...'
-                    archiveArtifacts artifacts: 'test-results/**',        allowEmptyArchive: true
-                    archiveArtifacts artifacts: '.features-gen/**',       allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'test-results/**',  allowEmptyArchive: true
+                    archiveArtifacts artifacts: '.features-gen/**', allowEmptyArchive: true
                 }
                 success {
                     echo '✅ MCP BDD Cart Test passed!'
@@ -220,8 +209,9 @@ pipeline {
             }
             post {
                 always {
-                    // Requires "Allure Jenkins Plugin" installed in Jenkins.
-                    // Install via: Manage Jenkins > Plugins > Allure
+                    // ✅ archiveArtifacts moved here from global post to fix
+                    // "Required context class hudson.FilePath is missing" error
+                    archiveArtifacts artifacts: 'allure-report/**', allowEmptyArchive: true
                     allure([
                         includeProperties: false,
                         jdk: '',
@@ -235,11 +225,6 @@ pipeline {
     // ─────────────────────────────────────────────
     post {
     // ─────────────────────────────────────────────
-        always {
-            // sh 'rm -rf /root/.cache/ms-playwright || true'
-            archiveArtifacts artifacts: 'allure-report/**', allowEmptyArchive: true
-            // cleanWs()   // Clean workspace after each build
-        }
         success {
             echo '✅ Pipeline completed — all UI and API tests passed!'
             script {
@@ -255,4 +240,3 @@ pipeline {
         }
     }
 }
-
