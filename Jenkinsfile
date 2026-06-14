@@ -236,8 +236,9 @@ pipeline {
     post {
     // ─────────────────────────────────────────────
         always {
+            sh 'rm -rf /root/.cache/ms-playwright || true'
             archiveArtifacts artifacts: 'allure-report/**', allowEmptyArchive: true
-            cleanWs()   // Clean workspace after each build
+            // cleanWs()   // Clean workspace after each build
         }
         success {
             echo '✅ Pipeline completed — all UI and API tests passed!'
