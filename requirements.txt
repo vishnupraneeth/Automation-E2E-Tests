@@ -1,0 +1,66 @@
+# ============================================================
+# requirements.txt — Test Automation E2E Framework
+# ============================================================
+# This file documents ALL dependencies needed to run the project.
+#
+# Node.js project install command:
+#   npm install          (installs all packages below from package.json)
+#   npm ci               (clean install — recommended for CI pipelines)
+#
+# Browser install:
+#   npx playwright install chromium --with-deps
+# ============================================================
+
+
+# ------------------------------------------------------------
+# SYSTEM PREREQUISITES
+# (must be installed on your machine / CI agent before anything else)
+# ------------------------------------------------------------
+
+node >= 18.0.0          # JavaScript runtime      → https://nodejs.org
+npm  >= 8.0.0           # Node package manager    → bundled with Node.js
+java >= 11              # Required for Allure CLI  → https://adoptium.net
+
+
+# ------------------------------------------------------------
+# PLAYWRIGHT BROWSERS
+# (installed via Playwright, not npm)
+# Command: npx playwright install chromium --with-deps
+# ------------------------------------------------------------
+
+chromium                # Headless Chrome for UI + BDD tests
+
+
+# ------------------------------------------------------------
+# NPM DEV DEPENDENCIES
+# (installed via: npm install)
+# ------------------------------------------------------------
+
+@playwright/test        ^1.60.0     # Core Playwright test runner
+playwright-bdd          ^9.1.0      # Gherkin BDD support for Playwright
+@faker-js/faker         ^8.4.1      # Random test data generation
+allure-playwright       ^3.10.0     # Allure reporter plugin for Playwright
+allure-commandline      ^2.42.1     # CLI to generate Allure HTML reports
+typescript              ^6.0.3      # TypeScript compiler
+@types/node             ^25.9.3     # Node.js type definitions
+@types/luxon            ^3.7.1      # Luxon date library type definitions
+
+
+# ------------------------------------------------------------
+# NPM RUNTIME DEPENDENCIES
+# (installed via: npm install)
+# ------------------------------------------------------------
+
+csv-parse               ^6.2.1      # CSV file parsing (data-driven tests)
+dotenv                  ^17.4.2     # Load .env config files per environment
+luxon                   ^3.7.2      # Date/time utilities
+
+
+# ------------------------------------------------------------
+# JENKINS PLUGINS REQUIRED (for Jenkinsfile pipeline)
+# Install via: Manage Jenkins → Plugins → Available
+# ------------------------------------------------------------
+
+NodeJS Plugin                       # Provides 'tools { nodejs }' in pipeline
+Allure Jenkins Plugin               # Provides 'allure([...])' report step
+HTML Publisher Plugin               # (optional) For HTML report tab in Jenkins

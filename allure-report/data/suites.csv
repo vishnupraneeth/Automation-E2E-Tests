@@ -1,0 +1,4 @@
+"DESCRIPTION","DURATION IN MS","NAME","PARENT SUITE","START TIME","STATUS","STOP TIME","SUB SUITE","SUITE","TEST CLASS","TEST METHOD"
+"","7561","Login Page Title Validation","chromium","2026-06-13","passed","2026-06-13","","loginpagefix.spec.ts","",""
+"","6848","Sign Up Button Validation","chromium","2026-06-13","passed","2026-06-13","","loginpagefix.spec.ts","",""
+"","9830","Login to Application","chromium","2026-06-13","passed","2026-06-13","","loginpagefix.spec.ts","",""
