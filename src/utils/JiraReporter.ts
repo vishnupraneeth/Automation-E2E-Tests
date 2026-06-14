@@ -29,12 +29,16 @@ export default class JiraReporter implements Reporter {
   // Collect failures synchronously in onTestEnd; file bugs in onEnd
   private failures: Array<{ test: TestCase; result: TestResult }> = [];
 
+  // Track created bug IDs for summary
+  private createdIssues: Array<{ testTitle: string; issueKey: string; issueUrl: string }> = [];
+  private failedIssues:  Array<{ testTitle: string; error: string }> = [];
+
   onBegin(_config: FullConfig): void {
-    this.baseUrl = (process.env.JIRA_BASE_URL ?? "").replace(/\/$/, "");
-    this.email = process.env.JIRA_EMAIL ?? "";
-    this.token = process.env.JIRA_API_TOKEN ?? "";
+    this.baseUrl    = (process.env.JIRA_BASE_URL ?? "").replace(/\/$/, "");
+    this.email      = process.env.JIRA_EMAIL ?? "";
+    this.token      = process.env.JIRA_API_TOKEN ?? "";
     this.projectKey = process.env.JIRA_PROJECT_KEY ?? "";
-    this.auth = Buffer.from(`${this.email}:${this.token}`).toString("base64");
+    this.auth       = Buffer.from(`${this.email}:${this.token}`).toString("base64");
 
     if (!this.baseUrl || !this.email || !this.token || !this.projectKey) {
       console.warn(
@@ -63,19 +67,55 @@ export default class JiraReporter implements Reporter {
       const errorMessage =
         result.errors.map((e) => e.message ?? "").join("\n") || "Unknown error";
       const testTitle = test.titlePath().join(" > ");
-      const testFile = test.location.file.replace(process.cwd(), "");
+      const testFile  = test.location.file.replace(process.cwd(), "");
 
-      const summary = `[Automation Bug] ${testTitle}`;
+      const summary     = `[Automation Bug] ${testTitle}`;
       const description = this.buildDescription(testTitle, testFile, errorMessage, result);
 
       try {
         const issueKey = await this.createJiraIssue(summary, description);
-        console.log(`[JiraReporter] 🐞 Bug filed: ${this.baseUrl}/browse/${issueKey}`);
+        const issueUrl = `${this.baseUrl}/browse/${issueKey}`;
+        this.createdIssues.push({ testTitle, issueKey, issueUrl });
+        // ✅ Print immediately so it appears in Jenkins logs right away
+        process.stdout.write(`[JiraReporter] 🐞 Bug filed: ${issueKey}  →  ${issueUrl}\n`);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[JiraReporter] ❌ Failed to create Jira issue for "${testTitle}": ${msg}`);
+        this.failedIssues.push({ testTitle, error: msg });
+        process.stdout.write(`[JiraReporter] ❌ Failed to create Jira issue for "${testTitle}": ${msg}\n`);
       }
     }
+
+    // ✅ Print a clear summary table so all bug IDs are visible in one place
+    this.printSummary();
+
+    // ✅ Give stdout a tick to fully flush before Playwright exits
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  // ─── summary ───────────────────────────────────────────────────────────────
+
+  private printSummary(): void {
+    const divider = "─".repeat(72);
+    process.stdout.write(`\n[JiraReporter] ${divider}\n`);
+    process.stdout.write(`[JiraReporter] 📊  JIRA BUG SUMMARY\n`);
+    process.stdout.write(`[JiraReporter] ${divider}\n`);
+
+    if (this.createdIssues.length > 0) {
+      process.stdout.write(`[JiraReporter] ✅  Created (${this.createdIssues.length}):\n`);
+      for (const { issueKey, issueUrl, testTitle } of this.createdIssues) {
+        process.stdout.write(`[JiraReporter]    🔑 ${issueKey}  |  ${testTitle}\n`);
+        process.stdout.write(`[JiraReporter]       🔗 ${issueUrl}\n`);
+      }
+    }
+
+    if (this.failedIssues.length > 0) {
+      process.stdout.write(`[JiraReporter] ❌  Failed to create (${this.failedIssues.length}):\n`);
+      for (const { testTitle, error } of this.failedIssues) {
+        process.stdout.write(`[JiraReporter]    • ${testTitle}: ${error}\n`);
+      }
+    }
+
+    process.stdout.write(`[JiraReporter] ${divider}\n\n`);
   }
 
   // ─── helpers ───────────────────────────────────────────────────────────────
@@ -86,7 +126,6 @@ export default class JiraReporter implements Reporter {
     error: string,
     result: TestResult
   ): object {
-    // Jira Cloud uses Atlassian Document Format (ADF) for descriptions
     return {
       version: 1,
       type: "doc",
@@ -153,22 +192,22 @@ export default class JiraReporter implements Reporter {
     return new Promise((resolve, reject) => {
       const body = JSON.stringify({
         fields: {
-          project: { key: this.projectKey },
+          project:     { key: this.projectKey },
           summary,
           description,
-          issuetype: { name: "Task" },
+          issuetype:   { name: "Task" },
         },
       });
 
-      const parsed = new URL(`${this.baseUrl}/rest/api/3/issue`);
+      const parsed  = new URL(`${this.baseUrl}/rest/api/3/issue`);
       const options = {
         hostname: parsed.hostname,
-        path: parsed.pathname,
-        method: "POST",
+        path:     parsed.pathname,
+        method:   "POST",
         headers: {
-          Authorization: `Basic ${this.auth}`,
-          "Content-Type": "application/json",
-          Accept: "application/json",
+          Authorization:    `Basic ${this.auth}`,
+          "Content-Type":   "application/json",
+          Accept:           "application/json",
           "Content-Length": Buffer.byteLength(body),
         },
       };
