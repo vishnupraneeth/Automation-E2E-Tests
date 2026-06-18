@@ -14,7 +14,7 @@ test.beforeEach(async ({ loginPage }) => {
 test('Login Page Title Validation',async({loginPage})=>{
 
     let title = await loginPage.getLoginPageTitle();
-    expect(title).toBe("Automationnnnn Exercise - Signup / Login");
+    expect(title).toBe("Automation Exercise - Signup / Login");
 });
 
 test('Sign Up Button Validation',async({loginPage})=>{
