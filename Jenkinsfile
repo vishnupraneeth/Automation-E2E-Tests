@@ -51,6 +51,9 @@ pipeline {
         JIRA_EMAIL = 'vishnupraneeth96@gmail.com'
         JIRA_PROJECT_KEY = 'KAN'
         JIRA_API_TOKEN = credentials('jira-api-token')
+
+        // ✅ FIX — this was missing, which is why LangChain always skipped AI analysis
+        OPENAI_API_KEY = credentials('openai-api-key')
     }
 
     options {
