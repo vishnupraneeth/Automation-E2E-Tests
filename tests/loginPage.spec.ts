@@ -17,7 +17,7 @@ test('Login Page Title Validation',async({page})=>{
 
     let title = await loginPage.getLoginPageTitle();
     // Deliberately wrong expected value to trigger Jira bug creation
-    expect(title).toBe("Automationnnn Exercise - Signup / Login");
+    expect(title).toBe("Automation Exercise - Signup / Login");
 });
 
 test('Sign Up Button Validation',async({page})=>{
